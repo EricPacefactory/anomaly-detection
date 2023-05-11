@@ -388,13 +388,18 @@ print("", "Calculating anomaly scores...", sep = "\n", flush = True)
 molly_scores_per_class = defaultdict(dict)
 for each_class_label, trails_by_id_dict in masked_trails_by_class_and_id.items():
     for each_obj_id, each_obj_dict in trails_by_id_dict.items():
-    
+        
+        # Get trail data in pixel coords, so we can use it to index into the heatmap
         trail_xy_px = np.int32(np.round(each_obj_dict["xy_center"] * heatmap_xy_scaling))
         trail_xy_px = np.clip(trail_xy_px, [0,0], [heat_w - 1, heat_h - 1])
+        
+        # Compute score by summing up 'heat' at each pixel that the trail visits
+        # -> This approach ignores the travel between consecutive samples. Simpler but maybe problematic in some cases?
         total_score = 0
         for each_xpx, each_ypx in trail_xy_px:
             total_score += log_heatmaps_per_class[each_class_label][each_ypx, each_xpx]
         
+        # Normalize score by sample count, so long-lasting trails don't inherently score higher
         num_trail_samples = len(trail_xy_px)
         molly_scores_per_class[each_class_label][each_obj_id] = total_score / num_trail_samples
 
