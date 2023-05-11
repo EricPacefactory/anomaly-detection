@@ -19,7 +19,7 @@ from time import perf_counter
 
 from collections import defaultdict
 
-from lib.history import load_history_file, save_history_file
+from lib.settings import SettingsDict
 from lib.loading import load_one_metadata, load_trail_data, load_snapshot_image, get_final_snap, get_report_folder_paths
 from lib.colormap import make_inferno_colormap, apply_cmap
 from lib.drawing import MouseClickCB
@@ -33,7 +33,7 @@ def print_time_taken_ms(t1, t2):
     print("-> Took {} ms".format(round(1000*(t2 - t1))))
     return
 
-def prompt_for_folder_select(parent_folder_path):
+def prompt_for_folder_select(parent_folder_path, prompt_message = "Options:"):
     
     # Get list of available folders to pick from
     child_paths = [osp.join(parent_folder_path, name) for name in os.listdir(parent_folder_path)]
@@ -41,12 +41,12 @@ def prompt_for_folder_select(parent_folder_path):
     folder_paths_list = [osp.join(parent_folder_path, name) for name in folder_names_list]
     
     # If there is only one option, choose it automatically without prompting
-    only_one_option = len(folder_names_list) == 1
+    only_one_option = (len(folder_names_list) == 1)
     if only_one_option:
         return folder_paths_list[0]
     
     # Ask for location selection
-    print("", "Options:", sep = "\n")
+    print("", prompt_message, sep = "\n")
     for idx, name in enumerate(folder_names_list):
         print("  {} - {}".format(idx + 1, name))
     print("", flush = True)
@@ -67,19 +67,6 @@ def nullfunc(x):
     ''' For trackbar callbacks '''
     return None
 
-# ---------------------------------------------------------------------------------------------------------------------
-#%% Config
-
-# Set minimum trail count. Classes with fewer trails are discarded from further processing
-MIN_NUM_TRAILS_FOR_HEATMAP = 50
-
-# Heatmap controls. Trail thickness has a very significant impact on results!
-HEATMAP_SIDE_LENGTH_PX = 360
-HEATMAP_TRAIL_THICKNESS = 2
-HEATMAP_BLUR_SIZE = 7
-
-# The set of keycodes that will close a window (for display windows only)
-WINDOW_CLOSE_KEYCODES = set([27, 113])  # esc or q
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -89,8 +76,8 @@ WINDOW_CLOSE_KEYCODES = set([27, 113])  # esc or q
 cv2.destroyAllWindows()
 
 # Figure out where the locations folder holding all camera data is
-history_dict = load_history_file(__file__)
-all_loc_folder_path = history_dict.get("locations_folder_path", None)
+settings_dict = SettingsDict(__file__)
+all_loc_folder_path = settings_dict.get("locations_folder_path", None)
 missing_all_loc_folder_path = (all_loc_folder_path is None)
 if missing_all_loc_folder_path:
     print("", flush = True)
@@ -101,8 +88,8 @@ all_loc_folder_path = osp.expanduser(all_loc_folder_path)
 print("", "Using locations folder:", "@ {}".format(all_loc_folder_path), sep = "\n")
 
 # Get user data selections
-location_select_path = prompt_for_folder_select(all_loc_folder_path)
-camera_select_path = prompt_for_folder_select(location_select_path)
+location_select_path = prompt_for_folder_select(all_loc_folder_path, "Select a location:")
+camera_select_path = prompt_for_folder_select(location_select_path, "Select a camera:")
 camera_select = osp.basename(camera_select_path)
 
 # Get important report pathing
@@ -114,12 +101,33 @@ all_snap_img_files = os.listdir(snap_img_folder_path)
 all_bg_img_files = os.listdir(bg_img_folder_path)
 good_data = (len(all_snap_img_files) > 0) and (len(all_bg_img_files) > 0)
 if good_data:
-    history_dict["locations_folder_path"] = all_loc_folder_path
-    save_history_file(__file__, history_dict)
+    settings_dict["locations_folder_path"] = all_loc_folder_path
+    settings_dict.save(__file__)
 
 # Load example snap/bg for display purposes
 ref_bg_path = osp.join(bg_img_folder_path, os.listdir(bg_img_folder_path)[0])
 ref_snap_path = osp.join(snap_img_folder_path, all_snap_img_files[0])
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+#%% Config
+
+# Set minimum trail count. Classes with fewer trails are discarded from further processing
+MIN_NUM_TRAILS_FOR_HEATMAP = settings_dict.get("min_num_trails", 50)
+
+# Heatmap controls. Trail thickness has a very significant impact on results!
+HEATMAP_SIDE_LENGTH_PX = settings_dict.get("heatmap_side_length_px", 360)
+HEATMAP_TRAIL_THICKNESS = settings_dict.get("heatmap_trail_thickness", 2)
+HEATMAP_BLUR_SIZE = settings_dict.get("heatmap_blur_size", 7)
+
+# Number of examples to show on output
+NUM_ANOMALIES_TO_PLOT = settings_dict.get("num_top_anomalies", 9)
+
+# The set of keycodes that will close a window (for display windows only)
+WINDOW_CLOSE_KEYCODES = set([27, 113])  # esc or q
+
+# Update settings for future use
+settings_dict.save(__file__)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -185,7 +193,7 @@ cv2.moveWindow(mask_winname, 50, 50)
 cv2.setMouseCallback(mask_winname, click_cb)
 
 # Set up trackbars for brush sizing and paint vs erasing
-brushsize_trackbar_name, default_brush_size = "Brush Size", 30
+brushsize_trackbar_name, default_brush_size = "Brush Size", 40
 paint_trackbar_name, default_paint_mode = "Erase/Paint", 1
 cv2.createTrackbar(brushsize_trackbar_name, mask_winname, default_brush_size, 100, nullfunc)
 cv2.createTrackbar(paint_trackbar_name, mask_winname, default_paint_mode, 1, nullfunc)
@@ -418,10 +426,9 @@ for each_class_label, scores_by_id_dict in molly_scores_per_class.items():
     ordered_objids_by_score_per_class[each_class_label] = ids_array[np.argsort(scores_array)]
 
 # Get 'top' anomalies for plotting
-num_anomalies_to_plot = 9
 top_anomaly_ids_per_class = {}
 for each_class_label, ordered_objids_by_anomaly_score in ordered_objids_by_score_per_class.items():
-    top_anomaly_ids_per_class[each_class_label] = ordered_objids_by_anomaly_score[:num_anomalies_to_plot]
+    top_anomaly_ids_per_class[each_class_label] = ordered_objids_by_anomaly_score[:NUM_ANOMALIES_TO_PLOT]
 
 # Loop to create image with heatmap + example anomaly trails, for each class (results will be combined into one image)
 trail_counts = []

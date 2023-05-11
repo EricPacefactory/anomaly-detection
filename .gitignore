@@ -3,11 +3,12 @@
 anomaly_outputs/
 .venv/
 .env/
+env/
 
 # Cache files
 *.pyc
 __pycache__
 
-# Pathing history saver file
-selection_history.json
+# Hold config settings & pathing info
+settings.json
 
