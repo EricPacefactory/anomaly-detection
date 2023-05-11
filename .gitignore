@@ -1,0 +1,13 @@
+
+# Project files
+anomaly_outputs/
+.venv/
+.env/
+
+# Cache files
+*.pyc
+__pycache__
+
+# Pathing history saver file
+selection_history.json
+
