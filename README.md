@@ -1,6 +1,6 @@
 # Anomaly Detection
 
-This is a demo script which tries to find anomaly trails using a heatmap of existing trails. It relies on having trail data from the safety-cv-2 realtime tracking system on the file system. The files area expected to be stored under a `locations` folder and should be structured as follows, where `location_name` and `camera_name` refer to a specific example dataset:
+This is a demo script which tries to find anomaly trails using a heatmap of existing trails. It relies on having trail data from the [safety-cv-2](https://github.com/pacefactory/scv2_realtime) realtime tracking system on the file system. The files are expected to be stored under a `locations` folder and should be structured as follows, where `location_name` and `camera_name` refer to a specific example dataset:
 
 ```
 locations/
@@ -66,7 +66,7 @@ The first time you run the script, you will be asked to enter the path to a [scv
 Enter path to scv2 locations folder: ~/enter/path/to/locations
 ```
 
-This will only occur once, with the result saved in a file called `selection_history.json` for future use (and you can modify it if you need to change this pathing later on).
+This will only occur once, with the result saved in a file called `settings.json` for future use (and you can modify it if you need to change this pathing later on). Other settings are also available in this file for editing.
 
 ## Usage
 
@@ -107,7 +107,7 @@ Masking works by 'painting' either white (in the mask) or black (outside the mas
 
 ### Step 3a: Heatmap scaling
 
-By this point heatmaps will have been created for each class label in the selected dataset (i.e. camera). In this step, you can adjust the scaling of the heatmaps before performing anomaly detection.
+By this point heatmaps will have been created for each class label in the selected dataset (i.e. the selected camera). In this step, you can adjust the scaling of the heatmaps before performing anomaly detection. This will (in general) alter the relative scoring of the trails (i.e. the ordering of which ones are the worst).
 
 <p align="center">
   <img src="github_images/heatmap_scaling.gif" height=320>
@@ -115,13 +115,13 @@ By this point heatmaps will have been created for each class label in the select
 
 There are controls for setting minimum and maximum thresholds on the number of trails allowed in any given part of the heatmap.
 
-The minimum threshold can be useful to exclude areas with very little traffic from being part of the heatmap. For example, a minimum threshold of 5 means that areas with fewer than 5 object trails will be completely excluded from the final heatmap. This prevents rare trails from 'counting towards themselves' later on during anomaly scoring.
+The minimum threshold can be useful to exclude areas with very little traffic from being part of the heatmap. For example, a minimum threshold of 5 means that (roughly) areas with fewer than 5 object trails will be completely excluded from the final heatmap. This prevents rare trails from 'counting towards themselves' later on during scoring.
 
 The maximum threshold can be set to avoid having an overly peaked distribution which may leads to strange weighting behaviors. For example, imagine one section of the scene (say a narrow walkway) sees 5000+ trails, while all other regions only see ~100 trails at most. Without a maximum threshold, any trail that overlaps the 5000+ area may not appear anomalous, simply because of how much 'heat' there is in that area, counting toward the object scoring. The maximum threshold puts an upper limit on how much a given area can count during trail scoring (although there is also a logarithmic scaling applied to reduce these effects further).
 
 ### Step 3b: Anomalies per class
 
-After setting the heatmap scaling, anomalies will be plotted. If these look ok, you may want to continue, otherwise it may be worth restarting with alternate masking/scaling parameters to achieve better results.
+After setting the heatmap scaling, anomalies will be plotted. If these look implausible, it may be worth restarting with alternate masking/scaling parameters to achieve better results.
 
 <p align="center">
   <img src="github_images/per_class_anomalies.webp">
@@ -129,7 +129,7 @@ After setting the heatmap scaling, anomalies will be plotted. If these look ok, 
 
 ### Step 3c: Individual anomaly examples
 
-At this point individual frames showing single anomaly trails will be shown in a tiled image, along with timessteps and scoring information. Again, these images can be used to decide if the current settings are acceptable.
+At this point, the top few examples will be shown in a tiled image, along with timessteps and scoring information. Again, these images can be used to decide if the current settings are acceptable.
 
 <p align="center">
   <img src="github_images/individual_examples.webp">
@@ -148,7 +148,6 @@ On the left is the original scene with the region contour(s) overlayed, based on
 
 ## Issues
 
-- There are some hidden configs, found in the `settings.json` file that is autogenerated on first run!
 - There is limited error handling, if something goes wrong, maybe try different config settings (especially with tiled displays)
 - There is only a single region mask which is applied to all classes. It probably makes sense to make these class-specific
 - The heatmap log-scaling is completely arbitrary. It may be nice to have other options
