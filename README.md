@@ -129,7 +129,7 @@ After setting the heatmap scaling, anomalies will be plotted. If these look impl
 
 ### Step 3c: Individual anomaly examples
 
-At this point, the top few examples will be shown in a tiled image, along with timessteps and scoring information. Again, these images can be used to decide if the current settings are acceptable.
+At this point, the top few examples will be shown in a tiled image, along with timesteps and scoring information. Again, these images can be used to decide if the current settings are acceptable.
 
 <p align="center">
   <img src="github_images/individual_examples.webp">
@@ -152,4 +152,5 @@ On the left is the original scene with the region contour(s) overlayed, based on
 - There is only a single region mask which is applied to all classes. It probably makes sense to make these class-specific
 - The heatmap log-scaling is completely arbitrary. It may be nice to have other options
 - The heatmap trail width (relative to the heatmap size) has a significant impact on the resulting heatmap (and subsequently, anomalies). It would be nice to automate the setting of this value, but it's not obvious how to do so
+- Object trails that 'dwell' in a busy area will tend towards being less anomalous even if the rest of the trail exists in rarely seen regions, due to counting the average heat *per sample*. On the otherhand, the heatmaps are generated in a way that does not account for dwelling. This discrepancy may cause issues, especially in scenes with lots of dwelling objects
 - When settings *don't* work well, the script forces you to completely start over. This can be a huge pain (especially with region masking), so running the script in an interactive environment is recommended (I used [Spyder](https://www.spyder-ide.org/), but [Jupyter notebook](https://jupyter.org/) or [VS Code with the Jupyter extension](https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter) should work as well).
