@@ -3,7 +3,7 @@
 This is a demo script which tries to find anomaly trails using a heatmap of existing trails. It relies on having trail data from the [safety-cv-2](https://github.com/pacefactory/scv2_realtime) realtime tracking system on the file system. The files are expected to be stored under a `locations` folder and should be structured as follows, where `location_name` and `camera_name` refer to a specific example dataset:
 
 ```
-locations/
+locations
 └── location_name
     └── camera_name
         └── report
@@ -16,8 +16,9 @@ locations/
                 ├── config_info
                 ├── objects
                 └── snapshots
-
 ```
+
+Example data can be downloaded from the [releases](https://github.com/EricPacefactory/anomaly-detection/releases/tag/example_data_1) section of this repo, to test out the detection results without requiring existing data.
 
 ## Overview
 
