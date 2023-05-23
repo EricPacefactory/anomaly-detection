@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta name="description" content="Description goes here" />
+  <meta charset="utf-8">
+  <link rel="icon" href="data:,">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  
+  <title>Heatmap/Anomaly Demo</title>
+</head>
+
+<style>
+
+  body {
+    background-color: gray;
+    display: flex;
+    flex-flow: column nowrap;
+    justify-content: center;
+    align-items: center;
+  }
+
+  canvas {
+    background-color: rgb(80,80,80);
+    width: 640px;
+    height: 360px;
+    margin: 2rem;
+    outline: black solid 2px;
+  }
+
+</style>
+
+<body>
+
+  <h1>Heatmap Demo</h1>
+  <p>Drag json data onto page to generate heatmap</p>
+  <canvas id="display_canvas"></canvas>
+
+<script>
+
+  // -----------------------------------------------------------------------------------------------------------------
+  // Trail functions
+
+  function xy_norm_to_px(xy, width_px, height_px) {
+    const [x,y] = xy;
+    return [x*(width_px - 1), y*(height_px - 1)];
+  }
+
+  // .................................................................................................................
+
+  function get_obj_trail_xy_px(one_obj_data, width_px, height_px) {
+    return one_obj_data["tracking"]["xy_center"].map(xy => xy_norm_to_px(xy, width_px, height_px));
+  }
+
+  // .................................................................................................................
+
+  function draw_trail(ctx, trail_xy_px) {
+
+    ctx.beginPath();
+    ctx.moveTo(...trail_xy_px[0]);
+    for (const [x_px, y_px] of trail_xy_px) {
+      ctx.lineTo(x_px, y_px);
+    }
+    ctx.stroke();
+
+    return;
+  }
+
+</script>
+
+
+<script>
+
+  // -----------------------------------------------------------------------------------------------------------------
+  // Heatmap functions
+
+  function make_heatmap(object_data_by_id, width = 640, height = 360, trail_thickness = 16, blur_size = 4) {
+
+    // Set up temporary canvas for drawing individual trails to build up heatmap
+    const temp_canvas = document.createElement("canvas");
+    temp_canvas.width = width;
+    temp_canvas.height = height;
+    const ctx = temp_canvas.getContext("2d", {willReadFrequently: true});
+    const num_pixels = width * height;
+
+    // Set up canvas styling for trail drawing
+    ctx.fillStyle = "black";      
+    ctx.strokeStyle = "rgb(255,255,255)";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = trail_thickness;
+    ctx.filter = `blur(${blur_size}px)`;
+
+    // Loop over all trail data, draw each one individually, and add the result to the heatmap
+    const raw_heatmap_1d = new Float32Array(num_pixels).fill(0);
+    for (const each_obj_data of Object.values(object_data_by_id)) {
+      const trail_xy_px = get_obj_trail_xy_px(each_obj_data, width, height);
+      _add_trail_to_heatmap_inplace(ctx, trail_xy_px, raw_heatmap_1d);
+    }
+
+    // Remove the RGB value scaling
+    // -> Use 255 value while drawing to get maximum 'color resolution' especially with blurring
+    // -> Want to remove 255 scaling on output, so that heatmap represents trail counts instead
+    const rgb_unscaling_factor = 1.0 / 255.0;
+    const new_heatmap_1d = raw_heatmap_1d.map(value => value * rgb_unscaling_factor);
+
+    return new_heatmap_1d;
+  }
+
+  // .................................................................................................................
+
+  function _add_trail_to_heatmap_inplace(ctx, trail_xy_px, heatmap_1d) {
+
+    /*
+    Function which takes a single trail, draws it and adds it to an existing heatmap
+    - All drawing config is assumed to be provided as-is by the ctx
+    - The operation is done 'in-place' meaning that the heatmap is directly modified (i.e. no new copies made)
+    - Make sure the drawing ctx uses the same number of pixels as the heatmap! There is no error handling for this
+    */
+
+    // Clear any existing data before drawing
+    const draw_w = ctx.canvas.width;
+    const draw_h = ctx.canvas.height;
+    ctx.fillRect(0, 0, draw_w, draw_h);
+    draw_trail(ctx, trail_xy_px);
+
+    // Grab the pixel (uint8) data from the trail image
+    // -> Note this data is stored as: [r0, g0, b0, a0, r1, g1, b1, a1, r2, g2, b2, a2, ...]
+    const trail_image_data = ctx.getImageData(0, 0, draw_w, draw_h).data;
+    
+    // Add the red channel pixel value of every pixel in the trail image to the existing heatmap
+    // -> This assumes we draw trails using red (or white) stroke coloring!
+    // -> Note the red pixel values fall on indices: 0, 4, 8, 12, etc...
+    for (let i = 0; i < heatmap_1d.length; i++) {
+      heatmap_1d[i] += trail_image_data[4*i];
+    }
+
+    return heatmap_1d;
+  }
+
+  // .................................................................................................................
+
+  function normalize_heatmap(heatmap_1d, min_cutoff = 5, max_cutoff = 50) {
+
+    /*
+    Function which normalizes a given heatmap to a 0 to 1 range, for better interpretability
+    Includes cutoffs, which are used to limit the value of the heatmap below/above some point,
+    which can help to avoid over-counting busy areas or otherwise rare areas.
+    */
+
+    // If we're missing either cutoff, use the data min/max values as the cutoff
+    const is_missing_min_cutoff = (min_cutoff === null);
+    const is_missing_max_cutoff = (max_cutoff === null);
+    if (is_missing_min_cutoff || is_missing_max_cutoff) {
+
+      // Figure out min/max range of heatmap for normalization
+      // -> Note: Math.min(...heatmap_1d) may fail due to array size, so using for-loop instead
+      let min_heat = Number.POSITIVE_INFINITY;
+      let max_heat = Number.NEGATIVE_INFINITY;
+      for (let heat of heatmap_1d) {
+        min_heat = Math.min(min_heat, heat);
+        max_heat = Math.max(max_heat, heat);
+      }
+    
+      // Set min/max cutoffs if not already given
+      min_cutoff = is_missing_min_cutoff ? min_heat : min_cutoff;
+      max_cutoff = is_missing_max_cutoff ? max_heat : max_cutoff;
+      max_cutoff = Math.max(min_cutoff + 1, max_cutoff);
+    }
+
+    // Scaling values 0 to 1
+    const heat_scale = 1.0 / (max_cutoff - min_cutoff);
+    const heatmap_norm = heatmap_1d.map(heat => (clamp(heat, min_cutoff, max_cutoff) - min_cutoff) * heat_scale);
+
+    return heatmap_norm;
+  }
+
+  // .................................................................................................................
+
+  function clamp(value, min, max) {
+    return Math.round(Math.min(Math.max(value, min), max));
+  }
+
+</script>
+
+
+<script>
+
+  // -----------------------------------------------------------------------------------------------------------------
+  // Visualization functions
+
+  function draw_heatmap(ctx, heatmap_norm_1d) {
+
+    // Make colormap
+    const cmap_256 = make_colormap_lut(256);
+
+    // Make heatmap image
+    const num_hm_pixels = heatmap_norm_1d.length;
+    const heatmap_image_uint8 = new Uint8ClampedArray(num_hm_pixels * 4);
+
+    for  (let i = 0; i < num_hm_pixels; i++) {
+      const output_pixel_idx = 4*i;
+      const heat_uint8 = Math.round(255 * heatmap_norm_1d[i]);
+      const [r,g,b] = cmap_256[heat_uint8];
+      heatmap_image_uint8[output_pixel_idx] = r;
+      heatmap_image_uint8[output_pixel_idx + 1] = g;
+      heatmap_image_uint8[output_pixel_idx + 2] = b;
+      heatmap_image_uint8[output_pixel_idx + 3] = 255;
+    }
+
+    // Draw heatmap image to canvas
+    const disp_w = ctx.canvas.width;
+    const disp_h = ctx.canvas.height;
+    const disp_image = ctx.getImageData(0, 0, disp_w, disp_h);
+    disp_image.data.set(heatmap_image_uint8);
+    ctx.putImageData(disp_image, 0, 0);
+
+    return heatmap_image_uint8;
+  }
+
+  // .................................................................................................................
+
+  function make_colormap_lut(num_cmap_levels = 256) {
+
+    /*
+    Function which creates a colormap for converting 1d grayscale values to rgb values.
+    It's meant to be used as a lookup table, for example:
+
+    const cmap = make_colormap_lut();
+    const ex_uint8_grayscale = 177;
+    const [r,g,b] = cmap[ex_uint8_grayscale];
+
+    Returns an array of uint8 values like:
+
+    [
+      [r0, g0, b0],
+      [r1, g1, b1],
+      [r2, g2, b2],
+      ...,
+      [rN, gN, bN]
+    ]
+
+    -> Where N is the number of colormap levels (256 by default)
+    */
+
+    // Define colors & color stops together, for clarity
+    const stops_and_colors = [
+      [0.00, "rgb(0,0,0)"],         // Black
+      [0.03, "rgb(50,15,45)"],      // Dark-purple
+      [0.33, "rgb(165,25,100)"],    // Purple
+      [0.67, "rgb(230,115,10)"],    // Orange
+      [0.97, "rgb(255,240,145)"],   // Yellow
+      [1.00, "rgb(255,255,255)"],   // White
+    ];
+
+    // Make canvas so we can draw colormap gradient
+    const temp_canvas = document.createElement("canvas");
+    temp_canvas.width = num_cmap_levels;
+    temp_canvas.height = 1;
+    const ctx = temp_canvas.getContext("2d");
+
+    // Create color gradient
+    const cmap_gradient = ctx.createLinearGradient(0, 0, num_cmap_levels, 0);
+    for (const [colorstop, rgb_str] of stops_and_colors) {
+      cmap_gradient.addColorStop(colorstop, rgb_str);
+    }
+
+    // Draw the gradient into the canvas
+    ctx.fillStyle = cmap_gradient;
+    ctx.fillRect(0, 0, num_cmap_levels, 1);
+    
+    // Convert the image data into an array of rgb tuples
+    // -> Image data is structured like:
+    //     r    g    b    a    r    g    b    a    r
+    //   [255, 254, 247, 255, 255, 252, 233, 255, 255, ...]
+    // -> We want list of rgb values (ignoring alpha):
+    //   [ [255, 254, 247], [255, 252, 233], ... ]
+    const cmap_1d = ctx.getImageData(0, 0, num_cmap_levels, 1).data;
+    const cmap_3d = new Array(num_cmap_levels);
+    for (let i = 0; i < num_cmap_levels; i++) {
+      const idx_1d = i * 4;
+      const r = cmap_1d[idx_1d + 0];
+      const g = cmap_1d[idx_1d + 1];
+      const b = cmap_1d[idx_1d + 2];
+      cmap_3d[i] = [r,g,b];
+    }
+
+    return cmap_3d;
+  }
+
+</script>
+
+
+<script>
+  
+  // -----------------------------------------------------------------------------------------------------------------
+  // Anomaly functions
+
+  function calculate_anomaly_scores(object_data_by_id, norm_heatmap_1d, heatmap_wh) {
+
+    /* Helper which just applies the 'calculate one score' to a dictionary of object data */
+
+    const scores = new Map();
+    for (const [each_obj_id, each_obj_data] of Object.entries(object_data_by_id)) {
+      const trail_xy_px = get_obj_trail_xy_px(each_obj_data, ...heatmap_wh);
+      const obj_score = calculate_one_anomaly_score(trail_xy_px, norm_heatmap_1d, heatmap_wh);
+      scores.set(each_obj_id, obj_score);
+    }
+
+    return scores;
+  }
+
+  // ...................................................................................................................
+
+  function calculate_one_anomaly_score(trail_xy_px, norm_heatmap_1d, heatmap_wh) {
+
+    // Set up helper function for forcing xy values to be inside of heatmap dimensions
+    const [w, h] = heatmap_wh;
+    const clamp_x = value => Math.round(clamp(value, 0, w - 1));
+    const clamp_y = value => Math.round(clamp(value, 0, h - 1));
+
+    // Sum up the 'heat' value at every pixel visted by the trail
+    let heat_sum = 0;
+    for (const [x_px, y_px] of trail_xy_px) {
+      const pixel_idx = clamp_y(y_px) * w + clamp_x(x_px);
+      heat_sum += norm_heatmap_1d[pixel_idx];
+    }
+
+    // Calculate anomaly score as '1 minus average heat'
+    // -> Higher scores correspond to trails that don't overlap the heatmap very much
+    const avg_heat = heat_sum / trail_xy_px.length;
+    const anomaly_score = 1.0 - avg_heat;
+
+    return anomaly_score;
+  }
+
+</script>
+
+<script>
+
+  // -----------------------------------------------------------------------------------------------------------------
+  // *** MAIN CODE ***
+
+  // Configuration settings
+  const disp_w = 640;
+  const disp_h = 360;
+  const heatmap_min_cutoff = 5;
+  const heatmap_max_cutoff = 50;
+  const num_top_anomalies_to_show = 3;
+
+  // Grab canvas-specific elements for drawing
+  const canvas = document.getElementById("display_canvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = disp_w;
+  canvas.height = disp_h;
+  canvas.style.width = disp_w;
+  canvas.style.height = disp_h;
+
+  // Add upload-on-drag to canvas (i.e. drag json file to generate heatmap)
+  const ignore_drags = ["dragenter", "dragover", "dragleave"];
+  ignore_drags.forEach(drag_event => document.addEventListener(drag_event, e => e.preventDefault(), false));
+  document.addEventListener("drop", async (e) => {
+
+    e.preventDefault();
+
+    // Convert the loaded json data into an object we can work with
+    const all_objs_dataset = await parse_uploaded_json_data(e.dataTransfer.files);
+    
+    // Make/view heatmap
+    const base_hm = make_heatmap(all_objs_dataset, disp_w, disp_h);
+    const norm_hm = normalize_heatmap(base_hm, heatmap_min_cutoff, heatmap_max_cutoff);
+    draw_heatmap(ctx, norm_hm);
+    
+    // Get sorted anomaly scores
+    const scores_map = calculate_anomaly_scores(all_objs_dataset, norm_hm, [disp_w, disp_h])
+    const sort_by_score = ([id_a, score_a], [id_b, score_b]) => score_b - score_a;
+    const sorted_objids_scores_array = Array.from(scores_map).sort(sort_by_score);
+
+    // Show top anomalies
+    const top_anomaly_ids = sorted_objids_scores_array.slice(0, num_top_anomalies_to_show).map(([id, score]) => id);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "red";
+    for (let molly_id of top_anomaly_ids) {
+      const molly_trail_xy_px = get_obj_trail_xy_px(all_objs_dataset[molly_id], disp_w, disp_h);
+      draw_trail(ctx, molly_trail_xy_px);
+    }
+  });
+
+
+  // .................................................................................................................
+
+  async function parse_uploaded_json_data(file_list) {
+
+    /* Helper used to handle file data upload */
+
+    // No files provided
+    const has_files = file_list.length > 0;
+    if (!has_files) {
+      return;
+    }
+
+    // Ignore non-file inputs
+    const file = file_list[0];
+    const file_type = file.type;
+    const missing_type = (file_type === undefined);
+    if (missing_type) {
+      console.error("Bad file data! Missing file type", file);
+      return;
+    }
+
+    // Ignore non-json files
+    const is_json = String(file_type).includes("json");
+    if (!is_json) {
+      alert(`Error! Must upload json data. Got type: ${file_type}`);
+      console.error("Bad upload! Not a json file", file);
+      return;
+    }
+
+    // Set up file read/parsing with promise so we can load data in synchronous looking way
+    const prom = new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", e => {
+        const json_str = e.target.result;
+        const data_dict = JSON.parse(json_str);
+        resolve(data_dict);
+      })
+      reader.addEventListener("error", e => reject(new Error("Error reading json data...")));
+      reader.readAsText(file);
+    })
+
+    return await prom;
+  }
+  
+  
+</script>
+
+</body>
+</html>

@@ -1,6 +1,7 @@
 
 # Project files
 anomaly_outputs/
+web_version/*.json
 .venv/
 .env/
 env/
